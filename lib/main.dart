@@ -1852,10 +1852,10 @@ class _HomePageState extends State<HomePage> {
         );
       }
 
+      if (!mounted) return;
       setState(() {
         if (!checkedIn) {
           checkedIn = true;
-          employees.first.present = true;
           records.add(
             PunchRecord(
               'Chấm công vào ca',
