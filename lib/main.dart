@@ -9,6 +9,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'models/employee.dart';
 import 'models/punch_record.dart';
@@ -489,6 +490,7 @@ class _HomePageState extends State<HomePage> {
   String? _apiError;
   bool checkedIn = false;
   bool checkedOut = false;
+  bool _loadingLocation = false;
   final List<Employee> employees = [
     Employee('Nguyễn Minh Anh', 'Thiết kế', 'NV-002', present: true),
     Employee('Trần Quốc Bảo', 'Kỹ thuật', 'NV-003'),
@@ -1032,7 +1034,7 @@ class _HomePageState extends State<HomePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Vị trí làm việc',
+                'Vị trí hiện tại',
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
                   color: ink,
@@ -1040,13 +1042,23 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               Text(
-                'Lưu khoảng cách, tọa độ và sai số GPS',
+                'Nhấn biểu tượng để xem và chia sẻ vị trí',
                 style: TextStyle(color: muted, fontSize: 11),
               ),
             ],
           ),
         ),
-        const Icon(Icons.my_location_rounded, color: blue, size: 20),
+        IconButton(
+          tooltip: 'Xem và chia sẻ vị trí',
+          onPressed: _loadingLocation ? null : _shareCurrentLocation,
+          icon: _loadingLocation
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.my_location_rounded, color: blue),
+        ),
       ],
     ),
   );
@@ -1935,6 +1947,62 @@ class _HomePageState extends State<HomePage> {
           'Không mở được mã QR công ty: ${error.toString().replaceFirst('Exception: ', '')}',
         );
       }
+    }
+  }
+
+  Future<void> _shareCurrentLocation() async {
+    setState(() => _loadingLocation = true);
+    try {
+      final position = await _getCurrentPosition();
+      if (!mounted) return;
+      final latitude = position.latitude.toStringAsFixed(6);
+      final longitude = position.longitude.toStringAsFixed(6);
+      final mapsLink = 'https://www.google.com/maps?q=$latitude,$longitude';
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Vị trí hiện tại'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SelectableText('Tọa độ: $latitude, $longitude'),
+              const SizedBox(height: 8),
+              Text(
+                position.accuracy.isFinite && position.accuracy > 0
+                    ? 'Sai số GPS: ±${position.accuracy.toStringAsFixed(1)} m'
+                    : 'Chưa có thông tin sai số GPS',
+              ),
+              const SizedBox(height: 8),
+              const Text('Chọn Chia sẻ để gửi liên kết bản đồ.'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Đóng'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                try {
+                  await SharePlus.instance.share(
+                    ShareParams(text: 'Vị trí hiện tại của tôi: $mapsLink'),
+                  );
+                } catch (error) {
+                  if (mounted) _notice('Không mở được chia sẻ vị trí: $error');
+                }
+              },
+              icon: const Icon(Icons.share_outlined),
+              label: const Text('Chia sẻ'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) _notice(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _loadingLocation = false);
     }
   }
 
