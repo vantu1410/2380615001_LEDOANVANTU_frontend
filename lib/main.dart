@@ -490,6 +490,7 @@ class _HomePageState extends State<HomePage> {
   String? _apiError;
   bool checkedIn = false;
   bool checkedOut = false;
+  bool _punching = false;
   bool _loadingLocation = false;
   final List<Employee> employees = [
     Employee('Nguyễn Minh Anh', 'Thiết kế', 'NV-002', present: true),
@@ -899,12 +900,23 @@ class _HomePageState extends State<HomePage> {
           height: 51,
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: checkedOut ? null : _punch,
-            icon: Icon(
-              checkedIn ? Icons.logout_rounded : Icons.qr_code_scanner_rounded,
-            ),
+            onPressed: checkedOut || _punching ? null : _punch,
+            icon: _punching
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    checkedIn
+                        ? Icons.logout_rounded
+                        : Icons.qr_code_scanner_rounded,
+                  ),
             label: Text(
-              checkedIn ? 'Chấm công tan ca' : 'Chấm công vào ca',
+              _punching
+                  ? 'Đang xử lý chấm công…'
+                  : checkedIn
+                  ? 'Chấm công tan ca'
+                  : 'Chấm công vào ca',
               style: const TextStyle(fontWeight: FontWeight.w800),
             ),
             style: FilledButton.styleFrom(
@@ -1812,6 +1824,7 @@ class _HomePageState extends State<HomePage> {
   void _punch() => _verifyAndPunch();
 
   Future<void> _verifyAndPunch() async {
+    setState(() => _punching = true);
     try {
       final qr = await Navigator.of(context)
           .push<String>(MaterialPageRoute(builder: (_) => const QrScanPage()));
@@ -1823,6 +1836,7 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
+      _notice('Đang lấy vị trí GPS và gửi lượt chấm công…');
       final position = await _getCurrentPosition();
       final distance = Geolocator.distanceBetween(
         position.latitude,
@@ -1879,6 +1893,7 @@ class _HomePageState extends State<HomePage> {
         }
       });
       if (_attendanceApi != null) await _refreshHistory();
+      if (!mounted) return;
       _notice(
         'Đã lưu vị trí GPS${accuracy == null ? '' : ' với sai số ±${accuracy.toStringAsFixed(1)}m'} và khoảng cách ${distance.toStringAsFixed(1)}m tới văn phòng. ${action == 'checkOut'
             ? overtimeMinutes > 0
@@ -1888,6 +1903,8 @@ class _HomePageState extends State<HomePage> {
       );
     } catch (error) {
       if (mounted) _notice(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _punching = false);
     }
   }
 
@@ -2434,7 +2451,13 @@ class _QrScanPageState extends State<QrScanPage> {
     setState(() => readingImage = true);
     try {
       completed = false;
-      final capture = await controller.analyzeImage(path);
+      final capture = await controller
+          .analyzeImage(path)
+          .timeout(
+            const Duration(seconds: 15),
+            onTimeout: () =>
+                throw TimeoutException('Đọc QR mất quá lâu. Hãy thử lại.'),
+          );
       if (!mounted) return;
       final value = capture?.barcodes.isNotEmpty == true
           ? capture!.barcodes.first.rawValue
@@ -2494,6 +2517,7 @@ class _QrScanPageState extends State<QrScanPage> {
         MobileScanner(
           controller: controller,
           onDetect: (capture) {
+            if (readingImage || completed) return;
             if (capture.barcodes.isEmpty) return;
             final value = capture.barcodes.first.rawValue;
             if (value == null) return;
@@ -2532,13 +2556,22 @@ class _QrScanPageState extends State<QrScanPage> {
                 ),
               ),
               const SizedBox(height: 10),
-              OutlinedButton.icon(
+              FilledButton.icon(
                 onPressed: readingImage ? null : _scanBuiltInCompanyQr,
-                icon: const Icon(Icons.qr_code_2_rounded),
-                label: const Text('Dùng QR demo đã lưu trong app'),
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: surface,
-                  foregroundColor: navy,
+                icon: readingImage
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.qr_code_2_rounded),
+                label: Text(
+                  readingImage
+                      ? 'Đang đọc QR…'
+                      : 'Dùng QR demo đã lưu trong app',
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: blue,
+                  foregroundColor: canvas,
                 ),
               ),
             ],
