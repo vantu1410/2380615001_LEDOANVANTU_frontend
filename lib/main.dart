@@ -306,7 +306,7 @@ class _LoginPageState extends State<LoginPage> {
                   TextField(
                     controller: email,
                     keyboardType: TextInputType.emailAddress,
-                    autofillHints: const [AutofillHints.email],
+                    autofillHints: const <String>[],
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.email_outlined),
                       hintText: 'ten@congty.vn',
@@ -323,11 +323,7 @@ class _LoginPageState extends State<LoginPage> {
                   controller: user,
                   autocorrect: false,
                   enableSuggestions: false,
-                  autofillHints: [
-                    isRegistering
-                        ? AutofillHints.newUsername
-                        : AutofillHints.username,
-                  ],
+                  autofillHints: const <String>[],
                   decoration: const InputDecoration(
                     prefixIcon: Icon(Icons.person_outline),
                     hintText: 'Nhập tên đăng nhập',
@@ -343,11 +339,7 @@ class _LoginPageState extends State<LoginPage> {
                   controller: password,
                   obscureText: true,
                   enableSuggestions: false,
-                  autofillHints: [
-                    isRegistering
-                        ? AutofillHints.newPassword
-                        : AutofillHints.password,
-                  ],
+                  autofillHints: const <String>[],
                   decoration: const InputDecoration(
                     prefixIcon: Icon(Icons.lock_outline),
                     hintText: 'Nhập mật khẩu',
