@@ -12,6 +12,7 @@ import 'package:sensors_plus/sensors_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'models/employee.dart';
+import 'employee_editor_dialog.dart';
 import 'models/punch_record.dart';
 import 'services/attendance_api.dart';
 import 'services/admin_user_api.dart';
@@ -2307,107 +2308,35 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _employeeDialog({Employee? existing}) async {
-    final name = TextEditingController(text: existing?.name ?? '');
-    final employeeEmail = TextEditingController(text: existing?.email ?? '');
-    final code = TextEditingController(
-      text:
-          existing?.code ??
-          'NV-${(employees.length + 2).toString().padLeft(3, '0')}',
-    );
-    final job = TextEditingController(text: existing?.role ?? 'Nhân viên');
-    final result = await showDialog<bool>(
+    final saved = await showDialog<Employee>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(existing == null ? 'Thêm nhân viên' : 'Cập nhật nhân viên'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: name,
-                decoration: const InputDecoration(labelText: 'Họ và tên'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: employeeEmail,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Email tài khoản nhân viên',
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: code,
-                decoration: const InputDecoration(labelText: 'Mã nhân viên'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: job,
-                decoration: const InputDecoration(
-                  labelText: 'Phòng ban / chức vụ',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Hủy'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (!employeeEmail.text.contains('@') ||
-                  name.text.trim().isEmpty ||
-                  code.text.trim().isEmpty ||
-                  job.text.trim().isEmpty) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(
-                    content: Text('Nhập đủ họ tên, mã nhân viên và chức vụ.'),
-                  ),
-                );
-                return;
-              }
-              Navigator.pop(ctx, true);
-            },
-            child: const Text('Lưu'),
-          ),
-        ],
+      barrierDismissible: false,
+      builder: (_) => EmployeeEditorDialog(
+        existing: existing,
+        initialCode: 'NV-${(employees.length + 2).toString().padLeft(3, '0')}',
+        save: (employee) async {
+          if (_employeeApi == null) return employee;
+          return existing == null
+              ? _employeeApi.create(employee)
+              : _employeeApi.update(employee);
+        },
       ),
     );
-    if (result == true) {
-      final employee = Employee(
-        name.text.trim(),
-        job.text.trim(),
-        code.text.trim(),
-        id: existing?.id,
-        email: employeeEmail.text.trim().toLowerCase(),
-        present: existing?.present ?? false,
-      );
-      try {
-        final saved = _employeeApi == null
-            ? employee
-            : existing == null
-            ? await _employeeApi.create(employee)
-            : await _employeeApi.update(employee);
-        if (!mounted) return;
-        setState(() {
-          if (existing == null) {
-            employees.add(saved);
-          } else {
-            final index = employees.indexOf(existing);
-            if (index >= 0) employees[index] = saved;
-          }
-          _apiError = null;
-        });
-      } catch (error) {
-        _notice(error.toString().replaceFirst('Exception: ', ''));
+    if (saved == null || !mounted) return;
+    setState(() {
+      if (existing == null) {
+        employees.add(saved);
+      } else {
+        final index = employees.indexWhere(
+          (e) =>
+              e.id == existing.id &&
+              (existing.id != null || identical(e, existing)),
+        );
+        if (index >= 0) employees[index] = saved;
       }
-    }
-    name.dispose();
-    code.dispose();
-    job.dispose();
-    employeeEmail.dispose();
+      _apiError = null;
+    });
+    _notice(existing == null ? 'Đã thêm nhân viên.' : 'Đã cập nhật nhân viên.');
   }
 }
 
