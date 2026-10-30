@@ -47,8 +47,35 @@ class BiometricSession {
   }
 
   static Future<void> clear() => _storage.delete(key: 'tutime.face');
+  static Future<bool> isEnabledFor(AuthSession session, String baseUrl) async {
+    final raw = await _storage.read(key: 'tutime.face');
+    if (raw == null) return false;
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      return data['baseUrl'] == baseUrl &&
+          data['id'] == session.userId &&
+          data['token'] == session.token &&
+          !_expired(session.token);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static bool _expired(String token) {
+    final claims = jsonDecode(
+      utf8.decode(base64Url.decode(base64Url.normalize(token.split('.')[1]))),
+    ) as Map<String, dynamic>;
+    return (claims['exp'] as num).toInt() <=
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  }
+
   static Future<void> save(AuthSession session, String baseUrl) async {
     if (_enrollment == null) throw Exception('Chưa chụp khuôn mặt.');
+    if (_expired(session.token)) {
+      throw Exception(
+        'Phiên đã hết hạn. Vui lòng đăng nhập lại bằng OTP trước khi đăng ký khuôn mặt.',
+      );
+    }
     await _storage.write(
       key: 'tutime.face',
       value: jsonEncode({

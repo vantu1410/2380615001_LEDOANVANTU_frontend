@@ -8,8 +8,8 @@
 - Phân quyền quản trị viên và nhân viên.
 - Thêm, xem, sửa, xóa nhân viên; liên kết hồ sơ với tài khoản theo họ tên và email.
 - Chấm công vào/tan ca bằng QR, lưu GPS và sai số; admin xem và hủy lượt chấm công.
-- Chia sẻ vị trí GPS; đo áp suất không khí.
-- Sau lần đăng nhập OTP: vào Tài khoản → Cài đặt → Đăng ký khuôn mặt để bật đăng nhập bằng camera trên thiết bị này.
+- Chia sẻ vị trí GPS; bảng áp suất có biểu đồ theo thời gian, thấp/cao/trung bình, tạm dừng và đo lại.
+- Sau lần đăng nhập OTP: cả nhân viên và quản trị viên đều có mục Quét / đăng ký khuôn mặt tại Tổng quan và Tài khoản. Có thể đăng ký, kiểm tra và tắt đăng nhập bằng camera trên thiết bị này.
 - Đổi cỡ chữ, màu nền và cập nhật họ tên trong Cài đặt.
 - Xin đi muộn/về sớm: nhân viên gửi đơn, admin duyệt/từ chối; lịch sử có nhãn khi lượt chấm công phù hợp đơn đã duyệt.
 

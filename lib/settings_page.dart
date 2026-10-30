@@ -33,10 +33,12 @@ class SettingsPage extends StatefulWidget {
     required this.session,
     required this.baseUrl,
     required this.onNameChanged,
+    required this.onFaceSetup,
   });
   final AuthSession session;
   final String baseUrl;
   final ValueChanged<String> onNameChanged;
+  final VoidCallback onFaceSetup;
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
@@ -54,22 +56,6 @@ class _SettingsPageState extends State<SettingsPage> {
   void dispose() {
     name.dispose();
     super.dispose();
-  }
-
-  Future<void> enableBiometrics() async {
-    setState(() => busy = true);
-    try {
-      if (!await BiometricSession.available()) {
-        throw Exception('Tính năng camera khuôn mặt hiện hỗ trợ Android.');
-      }
-      if (!await BiometricSession.authenticate()) return;
-      await BiometricSession.save(widget.session, widget.baseUrl);
-      message('Đã bật đăng nhập khuôn mặt cho tài khoản này.');
-    } catch (e) {
-      message(e.toString());
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
   }
 
   Future<void> saveProfile() async {
@@ -160,18 +146,9 @@ class _SettingsPageState extends State<SettingsPage> {
               'Đăng nhập mật khẩu và OTP lần đầu, sau đó bật xác thực trên thiết bị này. Khi phiên hết hạn cần xác thực OTP lại.',
             ),
             FilledButton.icon(
-              onPressed: busy ? null : enableBiometrics,
+              onPressed: busy ? null : widget.onFaceSetup,
               icon: const Icon(Icons.face),
-              label: const Text('Đăng ký khuôn mặt'),
-            ),
-            TextButton(
-              onPressed: busy
-                  ? null
-                  : () async {
-                      await BiometricSession.clear();
-                      message('Đã tắt đăng nhập khuôn mặt.');
-                    },
-              child: const Text('Tắt và xóa phiên đã lưu'),
+              label: const Text('Mở quét / đăng ký khuôn mặt'),
             ),
             const Divider(height: 36),
             const Text(

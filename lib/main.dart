@@ -13,6 +13,8 @@ import 'package:share_plus/share_plus.dart';
 
 import 'models/employee.dart';
 import 'employee_editor_dialog.dart';
+import 'face_enrollment_page.dart';
+import 'pressure_dashboard.dart';
 import 'models/punch_record.dart';
 import 'services/attendance_api.dart';
 import 'services/admin_user_api.dart';
@@ -759,6 +761,15 @@ class _HomePageState extends State<HomePage> {
       ),
       const SizedBox(height: 18),
       _locationCard(),
+      if (widget.accessToken != null) ...[
+        const SizedBox(height: 12),
+        _setting(
+          Icons.face_retouching_natural,
+          'Quét / đăng ký khuôn mặt',
+          'Bật đăng nhập khuôn mặt cho tài khoản của bạn',
+          _openFaceSetup,
+        ),
+      ],
       const SizedBox(height: 12),
       _setting(
         Icons.event_available_outlined,
@@ -1761,6 +1772,7 @@ class _HomePageState extends State<HomePage> {
                   role: isAdmin ? 'Admin' : 'Employee',
                 ),
                 baseUrl: _apiBaseUrl,
+                onFaceSetup: _openFaceSetup,
                 onNameChanged: (value) {
                   setState(() => _displayName = value);
                   _refreshEmployees();
@@ -1768,6 +1780,13 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
+        ),
+      if (widget.accessToken != null)
+        _setting(
+          Icons.face_retouching_natural,
+          'Quét / đăng ký khuôn mặt',
+          'Đăng ký và kiểm tra khuôn mặt của tài khoản này',
+          _openFaceSetup,
         ),
       _setting(
         Icons.badge_outlined,
@@ -1856,6 +1875,49 @@ class _HomePageState extends State<HomePage> {
       trailing: const Icon(Icons.chevron_right, color: muted),
     ),
   );
+
+  Future<void> _openFaceSetup() async {
+    if (widget.accessToken == null) {
+      _notice('Hãy đăng nhập bằng mật khẩu và OTP trước.');
+      return;
+    }
+    final session = AuthSession(
+      token: widget.accessToken!,
+      fullName: _displayName,
+      username: widget.username,
+      userId: widget.userId,
+      role: isAdmin ? 'Admin' : 'Employee',
+    );
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FaceEnrollmentPage(
+          name: _displayName,
+          username: widget.username,
+          checkEnabled: () =>
+              BiometricSession.isEnabledFor(session, _apiBaseUrl),
+          enroll: () async {
+            if (!await BiometricSession.available()) {
+              throw Exception('Quét khuôn mặt hiện hỗ trợ trên Android.');
+            }
+            if (!await BiometricSession.authenticate()) return false;
+            await BiometricSession.save(session, _apiBaseUrl);
+            return true;
+          },
+          verify: () async {
+            final matched = await BiometricSession.unlock(_apiBaseUrl);
+            if (matched == null) return false;
+            if (matched.userId != session.userId) {
+              throw Exception(
+                'Khuôn mặt đang được đăng ký cho tài khoản khác. Hãy đăng ký lại.',
+              );
+            }
+            return true;
+          },
+          disable: BiometricSession.clear,
+        ),
+      ),
+    );
+  }
 
   Future<void> _openScheduleRequests() async {
     if (widget.accessToken == null) {
@@ -2347,164 +2409,123 @@ class PressureSensorPage extends StatefulWidget {
   State<PressureSensorPage> createState() => _PressureSensorPageState();
 }
 
-class _PressureSensorPageState extends State<PressureSensorPage> {
+class _PressureSensorPageState extends State<PressureSensorPage>
+    with WidgetsBindingObserver {
   StreamSubscription<BarometerEvent>? _subscription;
   double? _pressureHpa;
   bool _sensorUnavailable = false;
-  final List<_PressureReading> _recentReadings = [];
-
-  double? get _fiveMinuteChange {
-    if (_recentReadings.length < 2) return null;
-    return (_recentReadings.last.value - _recentReadings.first.value).abs();
-  }
+  bool _paused = false;
+  bool _backgrounded = false;
+  int _generation = 0;
+  final List<PressureSample> _recentReadings = [];
 
   @override
   void initState() {
     super.initState();
-    _subscription =
-        barometerEventStream(samplingPeriod: const Duration(seconds: 1)).listen(
-          (event) {
-            if (!mounted) return;
-            final now = DateTime.now();
-            if (!event.pressure.isFinite || event.pressure <= 0) return;
-            _recentReadings.add(_PressureReading(now, event.pressure));
-            _recentReadings.removeWhere(
-              (reading) =>
-                  now.difference(reading.time) > const Duration(minutes: 5),
-            );
-            setState(() {
-              _pressureHpa = event.pressure;
-              _sensorUnavailable = false;
-            });
-          },
-          onError: (Object error) {
-            if (mounted) setState(() => _sensorUnavailable = true);
-          },
-        );
+    WidgetsBinding.instance.addObserver(this);
+    _startSensor();
+  }
+
+  Future<void> _stopSensor() async {
+    _generation++;
+    final old = _subscription;
+    _subscription = null;
+    await old?.cancel();
+  }
+
+  Future<void> _startSensor() async {
+    final generation = ++_generation;
+    final old = _subscription;
+    _subscription = null;
+    try {
+      await old?.cancel();
+      if (!mounted || _paused || _backgrounded || generation != _generation) {
+        return;
+      }
+      _subscription =
+          barometerEventStream(
+            samplingPeriod: const Duration(seconds: 1),
+          ).listen(
+            (event) {
+              if (!mounted ||
+                  generation != _generation ||
+                  !event.pressure.isFinite ||
+                  event.pressure <= 0) {
+                return;
+              }
+              final now = DateTime.now();
+              setState(() {
+                _recentReadings.add(PressureSample(now, event.pressure));
+                _recentReadings.removeWhere(
+                  (reading) =>
+                      now.difference(reading.time) > const Duration(minutes: 5),
+                );
+                _pressureHpa = event.pressure;
+                _sensorUnavailable = false;
+              });
+            },
+            onError: (Object error) {
+              if (mounted && generation == _generation) {
+                setState(() => _sensorUnavailable = true);
+              }
+            },
+          );
+    } catch (_) {
+      if (mounted && generation == _generation) {
+        setState(() => _sensorUnavailable = true);
+      }
+    }
+  }
+
+  void _togglePause() {
+    setState(() => _paused = !_paused);
+    if (_paused) {
+      _stopSensor();
+    } else {
+      _startSensor();
+    }
+  }
+
+  void _reset() {
+    setState(() {
+      _recentReadings.clear();
+      _pressureHpa = null;
+      _sensorUnavailable = false;
+      _paused = false;
+    });
+    _startSensor();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _backgrounded = state != AppLifecycleState.resumed;
+    if (_backgrounded) {
+      _stopSensor();
+    } else if (!_paused) {
+      _startSensor();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _generation++;
     _subscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Đo áp suất không khí'),
-      backgroundColor: canvas,
-      foregroundColor: ink,
-    ),
-    body: Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.speed_rounded, size: 72, color: blue),
-            const SizedBox(height: 18),
-            const Text(
-              'Áp suất khí quyển',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                color: ink,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _sensorUnavailable
-                  ? 'Thiết bị không cung cấp cảm biến áp suất.'
-                  : _pressureHpa == null
-                  ? 'Đang đọc cảm biến…'
-                  : '${_pressureHpa!.toStringAsFixed(1)} hPa',
-              style: const TextStyle(
-                fontSize: 30,
-                color: navy,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: (_fiveMinuteChange ?? 0) >= 2
-                    ? const Color(0xFF302719)
-                    : const Color(0xFF172720),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    (_fiveMinuteChange ?? 0) >= 2
-                        ? Icons.warning_amber_rounded
-                        : Icons.eco_outlined,
-                    color: (_fiveMinuteChange ?? 0) >= 2
-                        ? const Color(0xFFD88700)
-                        : green,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          (_fiveMinuteChange ?? 0) >= 2
-                              ? 'Áp suất đang thay đổi nhanh'
-                              : 'Theo dõi môi trường trong ca',
-                          style: const TextStyle(
-                            color: ink,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _fiveMinuteChange == null
-                              ? 'Đang thu thập dữ liệu để tạo mốc theo dõi 5 phút.'
-                              : 'Biến động trong tối đa 5 phút: ${_fiveMinuteChange!.toStringAsFixed(1)} hPa. Cảnh báo khi thay đổi từ 2 hPa.',
-                          style: const TextStyle(
-                            color: muted,
-                            fontSize: 12,
-                            height: 1.4,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Theo dõi biến động áp suất để tham khảo trong ca làm.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: muted, fontSize: 12, height: 1.45),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Dữ liệu đọc trực tiếp từ cảm biến khí áp của thiết bị.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: muted),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Trên giả lập: mở ⋮ → Virtual sensors → Additional sensors → Pressure để thay đổi giá trị mô phỏng.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: muted, height: 1.5),
-            ),
-          ],
-        ),
-      ),
+    appBar: AppBar(title: const Text('Đo áp suất không khí')),
+    body: PressureDashboard(
+      readings: List<PressureSample>.from(_recentReadings),
+      current: _pressureHpa,
+      unavailable: _sensorUnavailable,
+      paused: _paused || _backgrounded,
+      onPauseToggle: _togglePause,
+      onReset: _reset,
     ),
   );
-}
-
-class _PressureReading {
-  const _PressureReading(this.time, this.value);
-  final DateTime time;
-  final double value;
 }
 
 class QrScanPage extends StatefulWidget {
