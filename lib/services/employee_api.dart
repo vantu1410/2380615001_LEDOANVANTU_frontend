@@ -65,7 +65,10 @@ class EmployeeApi {
         )
         .timeout(const Duration(seconds: 90));
     _check(response);
-    return employee;
+    if (response.bodyBytes.isEmpty) return employee;
+    return Employee.fromJson(
+      jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>,
+    );
   }
 
   Future<void> delete(int? id) async {

@@ -17,8 +17,16 @@ import 'services/attendance_api.dart';
 import 'services/admin_user_api.dart';
 import 'services/auth_api.dart';
 import 'services/employee_api.dart';
+import 'services/biometric_session.dart';
+import 'settings_page.dart';
+import 'schedule_requests_page.dart';
+import 'services/schedule_request_api.dart';
 
-void main() => runApp(const ChamCongApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppPreferences.instance.load();
+  runApp(const ChamCongApp());
+}
 
 const ink = Color(0xFFF2F4F7);
 const navy = Color(0xFF171A20);
@@ -48,69 +56,78 @@ class ChamCongApp extends StatelessWidget {
   const ChamCongApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    debugShowCheckedModeBanner: false,
-    title: 'TuTime · Chấm công',
-    theme: ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: canvas,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: blue,
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: AppPreferences.instance,
+    builder: (context, _) => MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'TuTime · Chấm công',
+      theme: ThemeData(
+        useMaterial3: true,
         brightness: Brightness.dark,
-        primary: blue,
-        surface: surface,
-      ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: canvas,
-        foregroundColor: ink,
-        surfaceTintColor: Colors.transparent,
-      ),
-      cardTheme: const CardThemeData(
-        color: surface,
-        surfaceTintColor: Colors.transparent,
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: surface,
-        indicatorColor: blue.withValues(alpha: .17),
-        iconTheme: WidgetStateProperty.resolveWith(
-          (states) => IconThemeData(
-            color: states.contains(WidgetState.selected) ? blue : muted,
+        scaffoldBackgroundColor: Color(AppPreferences.instance.background),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: blue,
+          brightness: Brightness.dark,
+          primary: blue,
+          surface: surface,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: canvas,
+          foregroundColor: ink,
+          surfaceTintColor: Colors.transparent,
+        ),
+        cardTheme: const CardThemeData(
+          color: surface,
+          surfaceTintColor: Colors.transparent,
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: surface,
+          indicatorColor: blue.withValues(alpha: .17),
+          iconTheme: WidgetStateProperty.resolveWith(
+            (states) => IconThemeData(
+              color: states.contains(WidgetState.selected) ? blue : muted,
+            ),
+          ),
+          labelTextStyle: WidgetStateProperty.resolveWith(
+            (states) => TextStyle(
+              color: states.contains(WidgetState.selected) ? blue : muted,
+              fontWeight: states.contains(WidgetState.selected)
+                  ? FontWeight.w700
+                  : FontWeight.w500,
+            ),
           ),
         ),
-        labelTextStyle: WidgetStateProperty.resolveWith(
-          (states) => TextStyle(
-            color: states.contains(WidgetState.selected) ? blue : muted,
-            fontWeight: states.contains(WidgetState.selected)
-                ? FontWeight.w700
-                : FontWeight.w500,
+        dialogTheme: const DialogThemeData(backgroundColor: surface),
+        fontFamily: 'Roboto',
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: surfaceAlt,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: blue, width: 1.4),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 16,
           ),
         ),
       ),
-      dialogTheme: const DialogThemeData(backgroundColor: surface),
-      fontFamily: 'Roboto',
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: surfaceAlt,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: border),
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(
+          textScaler: TextScaler.linear(AppPreferences.instance.scale),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: blue, width: 1.4),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 16,
-        ),
+        child: child!,
       ),
+      home: const LoginPage(),
     ),
-    home: const LoginPage(),
   );
 }
 
@@ -150,6 +167,36 @@ class _LoginPageState extends State<LoginPage> {
     fullName.dispose();
     email.dispose();
     super.dispose();
+  }
+
+  Future<void> _faceLogin() async {
+    setState(() => busy = true);
+    try {
+      final session = await BiometricSession.unlock(_apiBaseUrl);
+      if (session == null || !mounted) return;
+      await AttendanceApi(_apiBaseUrl, session.token).getHistory();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => HomePage(
+            role: session.role.toLowerCase() == 'admin'
+                ? 'Quản trị viên'
+                : 'Nhân viên',
+            name: session.fullName,
+            username: session.username,
+            userId: session.userId,
+            accessToken: session.token,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Future<void> _continueAuth() async {
@@ -206,6 +253,7 @@ class _LoginPageState extends State<LoginPage> {
           user.text.trim(),
           otp.text.trim(),
         );
+        await BiometricSession.clear();
         displayRole = session.role.toLowerCase() == 'admin'
             ? 'Quản trị viên'
             : 'Nhân viên';
@@ -411,6 +459,12 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
+                if (!isRegistering && !showOtp)
+                  TextButton.icon(
+                    onPressed: busy ? null : _faceLogin,
+                    icon: const Icon(Icons.face),
+                    label: const Text('Đăng nhập bằng khuôn mặt'),
+                  ),
                 const SizedBox(height: 14),
                 Center(
                   child: TextButton(
@@ -485,6 +539,7 @@ class _HomePageState extends State<HomePage> {
   );
   int tab = 0;
   bool showingAdminAttendance = false;
+  late String _displayName = widget.name;
   late final EmployeeApi? _employeeApi;
   late final AttendanceApi? _attendanceApi;
   String? _apiError;
@@ -539,10 +594,13 @@ class _HomePageState extends State<HomePage> {
         records
           ..clear()
           ..addAll(remoteRecords);
-        if (remoteRecords.isNotEmpty) {
-          checkedIn = remoteRecords.first.action.contains('vào ca');
-          checkedOut = remoteRecords.first.action.contains('tan ca');
-        }
+        final today = remoteRecords.where(
+          (r) =>
+              r.userId == widget.userId &&
+              DateUtils.isSameDay(r.time, DateTime.now()),
+        );
+        checkedIn = today.any((r) => r.action.contains('vào ca'));
+        checkedOut = today.any((r) => r.action.contains('tan ca'));
       });
     } catch (error) {
       if (mounted) _notice(error.toString().replaceFirst('Exception: ', ''));
@@ -633,7 +691,7 @@ class _HomePageState extends State<HomePage> {
           CircleAvatar(
             backgroundColor: surfaceAlt,
             child: Text(
-              widget.name.isNotEmpty ? widget.name[0] : 'T',
+              _displayName.isNotEmpty ? _displayName[0] : 'T',
               style: const TextStyle(color: navy, fontWeight: FontWeight.bold),
             ),
           ),
@@ -643,7 +701,7 @@ class _HomePageState extends State<HomePage> {
       Text(_greeting(), style: const TextStyle(color: muted, fontSize: 14)),
       const SizedBox(height: 4),
       Text(
-        widget.name,
+        _displayName,
         style: const TextStyle(
           fontSize: 23,
           color: ink,
@@ -678,7 +736,7 @@ class _HomePageState extends State<HomePage> {
           Expanded(
             child: _metric(
               'Giờ làm',
-              checkedIn ? '03h 24m' : '00h 00m',
+              _workedToday(),
               Icons.schedule_rounded,
               surfaceAlt,
               blue,
@@ -700,6 +758,15 @@ class _HomePageState extends State<HomePage> {
       ),
       const SizedBox(height: 18),
       _locationCard(),
+      const SizedBox(height: 12),
+      _setting(
+        Icons.event_available_outlined,
+        'Xin đi muộn / về sớm',
+        isAdmin
+            ? 'Xem và duyệt đơn xin phép của nhân viên'
+            : 'Gửi đơn và xem kết quả duyệt',
+        _openScheduleRequests,
+      ),
       if (isAdmin) ...[
         const SizedBox(height: 18),
         Row(
@@ -855,12 +922,16 @@ class _HomePageState extends State<HomePage> {
                 color: const Color(0xFF172720),
                 borderRadius: BorderRadius.circular(30),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.circle, size: 7, color: green),
+                  const Icon(Icons.circle, size: 7, color: green),
                   SizedBox(width: 5),
                   Text(
-                    'ĐANG TRONG CA',
+                    checkedOut
+                        ? 'ĐÃ TAN CA'
+                        : checkedIn
+                        ? 'ĐANG TRONG CA'
+                        : 'CHƯA VÀO CA',
                     style: TextStyle(
                       fontSize: 9,
                       letterSpacing: .4,
@@ -1126,6 +1197,15 @@ class _HomePageState extends State<HomePage> {
                 '${item.place} · ${item.method}',
                 style: const TextStyle(color: muted, fontSize: 11),
               ),
+              if (item.approvalLabel != null)
+                Text(
+                  item.approvalLabel!,
+                  style: const TextStyle(
+                    color: green,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               if (_overtimeMinutes(item) > 0)
                 Text(
                   'Tăng ca ${_formatDuration(_overtimeMinutes(item))}',
@@ -1471,6 +1551,8 @@ class _HomePageState extends State<HomePage> {
                   ? green
                   : const Color(0xFFE0B863),
             ),
+            if (record.approvalLabel != null)
+              _recordTag(record.approvalLabel!, green),
             if (_overtimeMinutes(record) > 0)
               _recordTag(
                 'Tăng ca ${_formatDuration(_overtimeMinutes(record))}',
@@ -1535,6 +1617,9 @@ class _HomePageState extends State<HomePage> {
       setState(
         () => records.removeWhere((item) => item.recordId == record.recordId),
       );
+      await _refreshHistory();
+      await _refreshEmployees();
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Đã hủy lượt chấm công.')));
@@ -1573,7 +1658,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               Text(
-                '${e.code} · ${e.role}',
+                '${e.code} · ${e.role}\n${e.email.isEmpty ? 'Chưa có email liên kết' : e.email} · ${e.userId == null ? 'Chưa liên kết' : 'Đã liên kết'}',
                 style: const TextStyle(color: muted, fontSize: 11),
               ),
             ],
@@ -1637,7 +1722,7 @@ class _HomePageState extends State<HomePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    widget.name,
+                    _displayName,
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
@@ -1659,6 +1744,30 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
       const SizedBox(height: 18),
+      if (widget.accessToken != null)
+        _setting(
+          Icons.settings,
+          'Cài đặt',
+          'Cỡ chữ, màu nền, khuôn mặt và hồ sơ',
+          () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => SettingsPage(
+                session: AuthSession(
+                  token: widget.accessToken!,
+                  fullName: _displayName,
+                  username: widget.username,
+                  userId: widget.userId,
+                  role: isAdmin ? 'Admin' : 'Employee',
+                ),
+                baseUrl: _apiBaseUrl,
+                onNameChanged: (value) {
+                  setState(() => _displayName = value);
+                  _refreshEmployees();
+                },
+              ),
+            ),
+          ),
+        ),
       _setting(
         Icons.badge_outlined,
         'Thông tin cá nhân',
@@ -1747,6 +1856,23 @@ class _HomePageState extends State<HomePage> {
     ),
   );
 
+  Future<void> _openScheduleRequests() async {
+    if (widget.accessToken == null) {
+      _notice('Hãy đăng nhập bằng tài khoản để gửi đơn.');
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ScheduleRequestsPage(
+          api: ScheduleRequestApi(_apiBaseUrl, widget.accessToken!),
+          isAdmin: isAdmin,
+          userId: widget.userId,
+        ),
+      ),
+    );
+    if (mounted && _attendanceApi != null) await _refreshHistory();
+  }
+
   void _openAdminUsers() {
     if (widget.accessToken == null || _apiBaseUrl.isEmpty) {
       _notice(
@@ -1773,7 +1899,7 @@ class _HomePageState extends State<HomePage> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Họ tên: ${widget.name}'),
+          Text('Họ tên: $_displayName'),
           const SizedBox(height: 8),
           Text('Vai trò: ${isAdmin ? 'Quản trị viên' : 'Nhân viên'}'),
           const SizedBox(height: 8),
@@ -1876,6 +2002,8 @@ class _HomePageState extends State<HomePage> {
               now,
               'Cách VP ${distance.toStringAsFixed(1)}m',
               '${accuracy == null ? 'GPS chưa có sai số' : 'GPS ±${accuracy.toStringAsFixed(1)}m'} · $coordinates',
+              userId: widget.userId,
+              employeeName: _displayName,
               overtimeMinutes: overtimeMinutes,
             ),
           );
@@ -1887,12 +2015,15 @@ class _HomePageState extends State<HomePage> {
               now,
               'Cách VP ${distance.toStringAsFixed(1)}m',
               '${accuracy == null ? 'GPS chưa có sai số' : 'GPS ±${accuracy.toStringAsFixed(1)}m'} · $coordinates',
+              userId: widget.userId,
+              employeeName: _displayName,
               overtimeMinutes: overtimeMinutes,
             ),
           );
         }
       });
       if (_attendanceApi != null) await _refreshHistory();
+      if (_employeeApi != null) await _refreshEmployees();
       if (!mounted) return;
       _notice(
         'Đã lưu vị trí GPS${accuracy == null ? '' : ' với sai số ±${accuracy.toStringAsFixed(1)}m'} và khoảng cách ${distance.toStringAsFixed(1)}m tới văn phòng. ${action == 'checkOut'
@@ -2067,8 +2198,39 @@ class _HomePageState extends State<HomePage> {
   ][n - 1];
   String _clock(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-  String _clockFor(String _) =>
-      records.isEmpty ? _clock(DateTime.now()) : _clock(records.last.time);
+  List<PunchRecord> _ownToday() =>
+      records
+          .where(
+            (r) =>
+                r.userId == widget.userId &&
+                DateUtils.isSameDay(r.time, DateTime.now()),
+          )
+          .toList()
+        ..sort((a, b) => a.time.compareTo(b.time));
+  String _clockFor(String type) {
+    final entries = _ownToday().where(
+      (r) => r.action.contains(type == 'IN' ? 'vào ca' : 'tan ca'),
+    );
+    return entries.isEmpty
+        ? '--:--'
+        : _clock(type == 'IN' ? entries.first.time : entries.last.time);
+  }
+
+  String _workedToday() {
+    DateTime? start;
+    var minutes = 0;
+    for (final r in _ownToday()) {
+      if (r.action.contains('vào ca')) {
+        start ??= r.time;
+      } else if (start != null) {
+        minutes += r.time.difference(start).inMinutes;
+        start = null;
+      }
+    }
+    if (start != null) minutes += DateTime.now().difference(start).inMinutes;
+    return _formatDuration(minutes.clamp(0, 1440));
+  }
+
   int _calculateOvertimeMinutes(DateTime time) {
     final shiftEnd = DateTime(time.year, time.month, time.day, 17);
     return time.isAfter(shiftEnd) ? time.difference(shiftEnd).inMinutes : 0;
@@ -2092,6 +2254,7 @@ class _HomePageState extends State<HomePage> {
     final total = records
         .where(
           (record) =>
+              record.userId == widget.userId &&
               record.time.year == today.year &&
               record.time.month == today.month &&
               record.time.day == today.day,
@@ -2145,6 +2308,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _employeeDialog({Employee? existing}) async {
     final name = TextEditingController(text: existing?.name ?? '');
+    final employeeEmail = TextEditingController(text: existing?.email ?? '');
     final code = TextEditingController(
       text:
           existing?.code ??
@@ -2155,26 +2319,36 @@ class _HomePageState extends State<HomePage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(existing == null ? 'Thêm nhân viên' : 'Cập nhật nhân viên'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: name,
-              decoration: const InputDecoration(labelText: 'Họ và tên'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: code,
-              decoration: const InputDecoration(labelText: 'Mã nhân viên'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: job,
-              decoration: const InputDecoration(
-                labelText: 'Phòng ban / chức vụ',
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: 'Họ và tên'),
               ),
-            ),
-          ],
+              const SizedBox(height: 10),
+              TextField(
+                controller: employeeEmail,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Email tài khoản nhân viên',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: code,
+                decoration: const InputDecoration(labelText: 'Mã nhân viên'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: job,
+                decoration: const InputDecoration(
+                  labelText: 'Phòng ban / chức vụ',
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -2183,7 +2357,8 @@ class _HomePageState extends State<HomePage> {
           ),
           FilledButton(
             onPressed: () {
-              if (name.text.trim().isEmpty ||
+              if (!employeeEmail.text.contains('@') ||
+                  name.text.trim().isEmpty ||
                   code.text.trim().isEmpty ||
                   job.text.trim().isEmpty) {
                 ScaffoldMessenger.of(ctx).showSnackBar(
@@ -2206,6 +2381,7 @@ class _HomePageState extends State<HomePage> {
         job.text.trim(),
         code.text.trim(),
         id: existing?.id,
+        email: employeeEmail.text.trim().toLowerCase(),
         present: existing?.present ?? false,
       );
       try {
@@ -2231,6 +2407,7 @@ class _HomePageState extends State<HomePage> {
     name.dispose();
     code.dispose();
     job.dispose();
+    employeeEmail.dispose();
   }
 }
 
@@ -2260,12 +2437,16 @@ class _PressureSensorPageState extends State<PressureSensorPage> {
           (event) {
             if (!mounted) return;
             final now = DateTime.now();
+            if (!event.pressure.isFinite || event.pressure <= 0) return;
             _recentReadings.add(_PressureReading(now, event.pressure));
             _recentReadings.removeWhere(
               (reading) =>
                   now.difference(reading.time) > const Duration(minutes: 5),
             );
-            setState(() => _pressureHpa = event.pressure);
+            setState(() {
+              _pressureHpa = event.pressure;
+              _sensorUnavailable = false;
+            });
           },
           onError: (Object error) {
             if (mounted) setState(() => _sensorUnavailable = true);
@@ -2353,7 +2534,7 @@ class _PressureSensorPageState extends State<PressureSensorPage> {
                         Text(
                           _fiveMinuteChange == null
                               ? 'Đang thu thập dữ liệu để tạo mốc theo dõi 5 phút.'
-                              : 'Biến động 5 phút: ${_fiveMinuteChange!.toStringAsFixed(1)} hPa. Cảnh báo khi thay đổi từ 2 hPa.',
+                              : 'Biến động trong tối đa 5 phút: ${_fiveMinuteChange!.toStringAsFixed(1)} hPa. Cảnh báo khi thay đổi từ 2 hPa.',
                           style: const TextStyle(
                             color: muted,
                             fontSize: 12,
@@ -2368,7 +2549,7 @@ class _PressureSensorPageState extends State<PressureSensorPage> {
             ),
             const SizedBox(height: 14),
             const Text(
-              'Tính năng riêng TuTime: cảnh báo sớm khi áp suất môi trường thay đổi nhanh trong ca làm.',
+              'Theo dõi biến động áp suất để tham khảo trong ca làm.',
               textAlign: TextAlign.center,
               style: TextStyle(color: muted, fontSize: 12, height: 1.45),
             ),
